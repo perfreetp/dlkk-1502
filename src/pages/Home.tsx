@@ -9,7 +9,7 @@ import ToolDetailDrawer from '@/components/features/ToolDetailDrawer';
 
 const quickActions = [
   { icon: Wrench, label: '浏览工具', path: '/tools', color: 'bg-blue-500', desc: '按分类查找' },
-  { icon: Calendar, label: '预约借用', path: '/reserve', color: 'bg-orange-500', desc: '选日期时段' },
+  { icon: Calendar, label: '预约借用', path: '/reservation', color: 'bg-orange-500', desc: '选日期时段' },
   { icon: ClipboardList, label: '借还记录', path: '/records', color: 'bg-emerald-500', desc: '扫码借还' },
   { icon: User, label: '个人中心', path: '/profile', color: 'bg-purple-500', desc: '我的记录' },
 ];

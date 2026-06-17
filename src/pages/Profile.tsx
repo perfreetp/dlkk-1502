@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { User, Package, CreditCard, AlertTriangle, History, Shield, Ban, CheckCircle, XCircle, Building2, Phone, Hash, TrendingUp } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { User, Package, CreditCard, AlertTriangle, History, Shield, Ban, CheckCircle, XCircle, Building2, Phone, Hash, TrendingUp, Clock, AlertCircle, Search, Filter } from 'lucide-react';
 import { useAppStore } from '@/store';
-import { formatDate } from '@/utils/date';
+import { formatDate, isExpiringSoon } from '@/utils/date';
+import { BorrowRecord } from '@/types';
 import Card from '@/components/common/Card';
 import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
@@ -22,22 +23,65 @@ export default function Profile() {
     addBlacklist,
     removeBlacklist,
     toggleAdminView,
+    tools,
+    getOverdueCount,
+    getExpiringSoonCount,
+    getUnpaidCompensationCount,
   } = useAppStore();
 
   const [showBlacklistModal, setShowBlacklistModal] = useState(false);
   const [blacklistReason, setBlacklistReason] = useState('');
   const [blacklistDays, setBlacklistDays] = useState(7);
+  const [filterToolId, setFilterToolId] = useState('');
+  const [filterUser, setFilterUser] = useState('');
 
   const myRecords = getMyBorrowRecords();
   const myDeposits = getMyDeposits();
   const myCompensations = getMyCompensations();
   const hotTools = getHotTools();
-  const allRecords = isAdminView ? borrowRecords : myRecords;
 
-  const totalBorrowed = allRecords.length;
+  const overdueCount = getOverdueCount();
+  const expiringSoonCount = getExpiringSoonCount();
+  const unpaidCompensationCount = getUnpaidCompensationCount();
+
+  const filteredRecords = useMemo(() => {
+    let records = isAdminView ? borrowRecords : myRecords;
+    if (isAdminView) {
+      if (filterToolId) {
+        records = records.filter((r) => r.toolId === filterToolId);
+      }
+      if (filterUser.trim()) {
+        const keyword = filterUser.trim().toLowerCase();
+        records = records.filter(
+          (r) =>
+            r.userName.toLowerCase().includes(keyword) ||
+            r.roomNumber.toLowerCase().includes(keyword)
+        );
+      }
+    }
+    return records;
+  }, [isAdminView, borrowRecords, myRecords, filterToolId, filterUser]);
+
+  const totalBorrowed = filteredRecords.length;
   const totalDeposit = myDeposits.reduce((sum, d) => sum + d.amount, 0);
   const totalCompensation = myCompensations.reduce((sum, c) => sum + c.amount, 0);
   const pendingCompensation = myCompensations.filter((c) => c.status === '待支付').reduce((sum, c) => sum + c.amount, 0);
+
+  const overdueRecords = useMemo(() => {
+    const now = new Date();
+    const base = isAdminView ? borrowRecords : myRecords;
+    return base.filter((r) => r.status === 'borrowed' && new Date(r.expectedReturnAt) < now);
+  }, [isAdminView, borrowRecords, myRecords]);
+
+  const expiringRecords = useMemo(() => {
+    const base = isAdminView ? borrowRecords : myRecords;
+    return base.filter((r) => r.status === 'borrowed' && isExpiringSoon(r.expectedReturnAt));
+  }, [isAdminView, borrowRecords, myRecords]);
+
+  const unpaidCompensations = useMemo(() => {
+    const base = isAdminView ? borrowRecords : myRecords;
+    return base.filter((r) => r.damageReport && !r.damageReport.isPaid);
+  }, [isAdminView, borrowRecords, myRecords]);
 
   const handleAddBlacklist = () => {
     if (!blacklistReason.trim()) return;
@@ -53,8 +97,41 @@ export default function Profile() {
       label: '历史借用',
       content: (
         <div className="space-y-4">
-          {allRecords.length > 0 ? (
-            allRecords.map((record) => (
+          {isAdminView && (
+            <div className="flex flex-col sm:flex-row gap-3 p-4 bg-gray-50 rounded-lg">
+              <div className="flex items-center gap-2 flex-1">
+                <Filter className="w-4 h-4 text-gray-400" />
+                <select
+                  value={filterToolId}
+                  onChange={(e) => setFilterToolId(e.target.value)}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                >
+                  <option value="">全部工具</option>
+                  {tools.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2 flex-1">
+                <Search className="w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  value={filterUser}
+                  onChange={(e) => setFilterUser(e.target.value)}
+                  placeholder="搜索住户姓名或房间号..."
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              {(filterToolId || filterUser) && (
+                <Button variant="outline" size="sm" onClick={() => { setFilterToolId(''); setFilterUser(''); }}>
+                  清除筛选
+                </Button>
+              )}
+            </div>
+          )}
+
+          {filteredRecords.length > 0 ? (
+            filteredRecords.map((record) => (
               <Card key={record.id} hover>
                 <Card.Content className="p-4">
                   <div className="flex items-start gap-4">
@@ -187,6 +264,111 @@ export default function Profile() {
       label: '管理统计',
       content: (
         <div className="space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Card className="border-l-4 border-l-red-500">
+              <Card.Content className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
+                    <AlertCircle className="w-5 h-5 text-red-600" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-red-600">{overdueCount}</p>
+                    <p className="text-xs text-gray-500">逾期未还</p>
+                  </div>
+                </div>
+              </Card.Content>
+            </Card>
+            <Card className="border-l-4 border-l-amber-500">
+              <Card.Content className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
+                    <Clock className="w-5 h-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-amber-600">{expiringSoonCount}</p>
+                    <p className="text-xs text-gray-500">即将到期</p>
+                  </div>
+                </div>
+              </Card.Content>
+            </Card>
+            <Card className="border-l-4 border-l-orange-500">
+              <Card.Content className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
+                    <XCircle className="w-5 h-5 text-orange-600" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-orange-600">{unpaidCompensationCount}</p>
+                    <p className="text-xs text-gray-500">赔付待处理</p>
+                  </div>
+                </div>
+              </Card.Content>
+            </Card>
+          </div>
+
+          {overdueRecords.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-600" />
+                逾期未还清单
+              </h3>
+              <div className="space-y-2">
+                {overdueRecords.map((r) => (
+                  <div key={r.id} className="flex items-center gap-3 p-3 bg-red-50 rounded-lg border border-red-100">
+                    <img src={r.toolImage} alt="" className="w-10 h-10 rounded object-cover" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{r.toolName}</p>
+                      <p className="text-xs text-gray-500">{r.userName} · {r.roomNumber}</p>
+                    </div>
+                    <Badge variant="danger">逾期 {Math.ceil((Date.now() - new Date(r.expectedReturnAt).getTime()) / 86400000)} 天</Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {expiringRecords.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-amber-600" />
+                即将到期清单
+              </h3>
+              <div className="space-y-2">
+                {expiringRecords.map((r) => (
+                  <div key={r.id} className="flex items-center gap-3 p-3 bg-amber-50 rounded-lg border border-amber-100">
+                    <img src={r.toolImage} alt="" className="w-10 h-10 rounded object-cover" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{r.toolName}</p>
+                      <p className="text-xs text-gray-500">{r.userName} · {r.roomNumber}</p>
+                    </div>
+                    <Badge variant="warning">即将到期</Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {unpaidCompensations.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                <XCircle className="w-4 h-4 text-orange-600" />
+                赔付待处理清单
+              </h3>
+              <div className="space-y-2">
+                {unpaidCompensations.map((r) => (
+                  <div key={r.id} className="flex items-center gap-3 p-3 bg-orange-50 rounded-lg border border-orange-100">
+                    <img src={r.toolImage} alt="" className="w-10 h-10 rounded object-cover" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{r.toolName}</p>
+                      <p className="text-xs text-gray-500">{r.userName} · {r.roomNumber} · {r.damageReport?.description}</p>
+                    </div>
+                    <span className="text-sm font-semibold text-orange-600">¥{r.damageReport?.compensationAmount}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div>
             <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <TrendingUp className="w-4 h-4" />

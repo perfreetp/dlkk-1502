@@ -4,6 +4,7 @@ import Button from '@/components/common/Button';
 import Input from '@/components/common/Input';
 import Modal from '@/components/common/Modal';
 import { useAppStore } from '@/store';
+import { Reservation } from '@/types';
 
 interface QRCodeScannerProps {
   type: 'borrow' | 'return';
@@ -17,7 +18,8 @@ export default function QRCodeScanner({ type, isOpen, onClose, onSuccess }: QRCo
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState<'success' | 'error' | null>(null);
   const [message, setMessage] = useState('');
-  const { tools, borrowTool, returnTool, currentUser } = useAppStore();
+  const { tools, borrowTool, returnTool, currentUser, reservations, isAdminView } = useAppStore();
+  const [matchedReservation, setMatchedReservation] = useState<Reservation | null>(null);
 
   const handleScan = () => {
     setScanning(true);
@@ -57,23 +59,62 @@ export default function QRCodeScanner({ type, isOpen, onClose, onSuccess }: QRCo
     }
 
     if (type === 'borrow') {
+      if (tool.status !== 'available') {
+        setResult('error');
+        setMessage(`「${tool.name}」当前状态不可借出`);
+        return;
+      }
       if (tool.availableStock <= 0) {
         setResult('error');
         setMessage(`「${tool.name}」暂无可用库存`);
         return;
       }
-      borrowTool(tool.id);
-      setResult('success');
-      setMessage(`成功借出「${tool.name}」，请按时归还`);
-    } else {
-      const borrowedRecord = useAppStore
-        .getState()
-        .borrowRecords.find(
-          (r) => r.toolId === tool.id && r.status === 'borrowed' && r.userId === currentUser.id
+
+      let matchedRes: Reservation | undefined;
+      if (isAdminView) {
+        matchedRes = reservations.find(
+          (r) => r.toolId === tool.id && r.status === 'approved'
         );
+      } else {
+        matchedRes = reservations.find(
+          (r) => r.toolId === tool.id && r.status === 'approved' && r.userId === currentUser.id
+        );
+      }
+
+      if (isAdminView && !matchedRes) {
+        setResult('error');
+        setMessage(`未找到「${tool.name}」的有效预约，请先审核预约后再借出`);
+        return;
+      }
+
+      const reservationId = matchedRes?.id;
+      const success = borrowTool(tool.id, reservationId);
+
+      if (success) {
+        setResult('success');
+        if (matchedRes) {
+          setMessage(`已通过预约借出「${tool.name}」给 ${matchedRes.userName}`);
+        } else {
+          setMessage(`成功借出「${tool.name}」，请按时归还`);
+        }
+      } else {
+        setResult('error');
+        setMessage('借出失败，请检查预约或库存状态');
+        return;
+      }
+    } else {
+      const state = useAppStore.getState();
+      let borrowedRecord = state.borrowRecords.find(
+        (r) => r.toolId === tool.id && r.status === 'borrowed' && r.userId === currentUser.id
+      );
+      if (isAdminView && !borrowedRecord) {
+        borrowedRecord = state.borrowRecords.find(
+          (r) => r.toolId === tool.id && r.status === 'borrowed'
+        );
+      }
       if (!borrowedRecord) {
         setResult('error');
-        setMessage('您没有正在借用的该工具');
+        setMessage('没有找到该工具的借用中记录');
         return;
       }
       returnTool(borrowedRecord.id);
@@ -92,6 +133,7 @@ export default function QRCodeScanner({ type, isOpen, onClose, onSuccess }: QRCo
     setResult(null);
     setMessage('');
     setScanning(false);
+    setMatchedReservation(null);
     onClose();
   };
 

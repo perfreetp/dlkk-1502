@@ -8,6 +8,7 @@ import { borrowRecords as initialBorrowRecords } from '@/data/borrowRecords';
 import { announcements as initialAnnouncements } from '@/data/announcements';
 import { buildings } from '@/data/buildings';
 import { categories } from '@/data/categories';
+import { generateDateRange } from '@/utils/date';
 
 interface AppState {
   currentUser: User;
@@ -26,11 +27,13 @@ interface AppState {
   approveReservation: (id: string) => void;
   rejectReservation: (id: string, reason: string) => void;
   cancelReservation: (id: string) => void;
-  borrowTool: (toolId: string, reservationId?: string) => void;
+  borrowTool: (toolId: string, reservationId?: string) => boolean;
   returnTool: (recordId: string, damageReport?: Omit<DamageReport, 'id' | 'reportedAt' | 'recordId'>) => void;
   getBorrowedCount: () => number;
   getPendingReturnCount: () => number;
   getExpiringSoonCount: () => number;
+  getOverdueCount: () => number;
+  getUnpaidCompensationCount: () => number;
   getHotTools: () => Tool[];
   getMyReservations: () => Reservation[];
   getMyBorrowRecords: () => BorrowRecord[];
@@ -38,6 +41,11 @@ interface AppState {
   getMyCompensations: () => { amount: number; status: string; date: string; toolName: string; description: string }[];
   addBlacklist: (userId: string, reason: string, days: number) => void;
   removeBlacklist: (userId: string) => void;
+  getToolReservedDates: (toolId: string) => string[];
+  getToolReservedTimeSlots: (toolId: string, date: string) => TimeSlot[];
+  updateToolStatus: (toolId: string, status: Tool['status']) => void;
+  updateToolLocation: (toolId: string, location: string, buildingId?: string, buildingName?: string) => void;
+  canReserveTool: (toolId: string, startDate: string, endDate: string, timeSlot: TimeSlot) => boolean;
 }
 
 const generateId = () => Math.random().toString(36).substring(2, 10);
@@ -102,7 +110,27 @@ export const useAppStore = create<AppState>()(
       borrowTool: (toolId, reservationId) => {
         const user = get().currentUser;
         const tool = get().tools.find((t) => t.id === toolId);
-        if (!tool) return;
+        if (!tool) return false;
+
+        if (user.isBlacklisted) return false;
+        if (tool.availableStock <= 0) return false;
+        if (tool.status !== 'available') return false;
+
+        if (reservationId) {
+          const reservation = get().reservations.find((r) => r.id === reservationId);
+          if (!reservation || reservation.status !== 'approved') return false;
+          if (reservation.toolId !== toolId) return false;
+        }
+
+        let expectedDays = 7;
+        if (reservationId) {
+          const reservation = get().reservations.find((r) => r.id === reservationId);
+          if (reservation) {
+            const start = new Date(reservation.startDate);
+            const end = new Date(reservation.endDate);
+            expectedDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+          }
+        }
 
         const newRecord: BorrowRecord = {
           id: 'br' + generateId(),
@@ -114,10 +142,10 @@ export const useAppStore = create<AppState>()(
           toolName: tool.name,
           toolImage: tool.image,
           borrowAt: new Date().toISOString(),
-          expectedReturnAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          expectedReturnAt: new Date(Date.now() + expectedDays * 24 * 60 * 60 * 1000).toISOString(),
           status: 'borrowed',
           depositPaid: tool.deposit,
-          rentPaid: tool.dailyRent,
+          rentPaid: tool.dailyRent * expectedDays,
         };
 
         set((state) => ({
@@ -125,7 +153,13 @@ export const useAppStore = create<AppState>()(
           tools: state.tools.map((t) =>
             t.id === toolId ? { ...t, availableStock: t.availableStock - 1, borrowCount: t.borrowCount + 1 } : t
           ),
+          reservations: reservationId
+            ? state.reservations.map((r) =>
+                r.id === reservationId ? { ...r, status: 'cancelled' as const } : r
+              )
+            : state.reservations,
         }));
+        return true;
       },
 
       returnTool: (recordId, damageReport) => {
@@ -249,6 +283,129 @@ export const useAppStore = create<AppState>()(
                   blacklistExpiry: undefined,
                 }
               : state.currentUser,
+        }));
+      },
+
+      getOverdueCount: () => {
+        const userId = get().currentUser.id;
+        const now = new Date();
+        return get().borrowRecords.filter((r) => {
+          if (r.status !== 'borrowed') return false;
+          if (!get().isAdminView && r.userId !== userId) return false;
+          const expected = new Date(r.expectedReturnAt);
+          return expected < now;
+        }).length;
+      },
+
+      getUnpaidCompensationCount: () => {
+        const userId = get().currentUser.id;
+        return get()
+          .borrowRecords.filter((r) => {
+            if (!get().isAdminView && r.userId !== userId) return false;
+            return r.damageReport && !r.damageReport.isPaid;
+          }).length;
+      },
+
+      getToolReservedDates: (toolId) => {
+        const dates: Set<string> = new Set();
+        get()
+          .reservations.filter((r) => r.toolId === toolId && (r.status === 'pending' || r.status === 'approved'))
+          .forEach((r) => {
+            const range = generateDateRange(r.startDate, Math.max(1, Math.ceil((new Date(r.endDate).getTime() - new Date(r.startDate).getTime()) / (1000 * 60 * 60 * 24)) + 1));
+            range.forEach((d) => dates.add(d));
+          });
+        get()
+          .borrowRecords.filter((r) => r.toolId === toolId && r.status === 'borrowed')
+          .forEach((r) => {
+            const borrowDate = r.borrowAt.split('T')[0];
+            const returnDate = r.expectedReturnAt.split('T')[0];
+            const range = generateDateRange(borrowDate, Math.max(1, Math.ceil((new Date(returnDate).getTime() - new Date(borrowDate).getTime()) / (1000 * 60 * 60 * 24)) + 1));
+            range.forEach((d) => dates.add(d));
+          });
+        return Array.from(dates);
+      },
+
+      getToolReservedTimeSlots: (toolId, date) => {
+        const slots: Set<TimeSlot> = new Set();
+        get()
+          .reservations.filter(
+            (r) => r.toolId === toolId && (r.status === 'pending' || r.status === 'approved') && date >= r.startDate && date <= r.endDate
+          )
+          .forEach((r) => {
+            if (r.timeSlot === 'fullday') {
+              slots.add('morning');
+              slots.add('afternoon');
+              slots.add('evening');
+              slots.add('fullday');
+            } else {
+              slots.add(r.timeSlot);
+              slots.add('fullday');
+            }
+          });
+        get()
+          .borrowRecords.filter((r) => r.toolId === toolId && r.status === 'borrowed')
+          .forEach((r) => {
+            const borrowDate = r.borrowAt.split('T')[0];
+            const returnDate = r.expectedReturnAt.split('T')[0];
+            if (date >= borrowDate && date <= returnDate) {
+              slots.add('morning');
+              slots.add('afternoon');
+              slots.add('evening');
+              slots.add('fullday');
+            }
+          });
+        return Array.from(slots);
+      },
+
+      canReserveTool: (toolId, startDate, endDate, timeSlot) => {
+        const tool = get().tools.find((t) => t.id === toolId);
+        if (!tool || tool.availableStock <= 0 || tool.status !== 'available') return false;
+
+        const datesToCheck = generateDateRange(startDate, Math.max(1, Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)) + 1));
+        
+        for (const date of datesToCheck) {
+          const reservedSlots = get().getToolReservedTimeSlots(toolId, date);
+          const activeReservationsCount = get().reservations.filter(
+            (r) => r.toolId === toolId && (r.status === 'pending' || r.status === 'approved') && date >= r.startDate && date <= r.endDate
+          ).length;
+          const borrowedCount = get().borrowRecords.filter(
+            (r) => r.toolId === toolId && r.status === 'borrowed'
+          ).length;
+          
+          if (activeReservationsCount + borrowedCount >= tool.totalStock) {
+            return false;
+          }
+          
+          if (timeSlot === 'fullday' && reservedSlots.length > 0) {
+            return false;
+          }
+          if (timeSlot !== 'fullday' && (reservedSlots.includes(timeSlot) || reservedSlots.includes('fullday'))) {
+            return false;
+          }
+        }
+        return true;
+      },
+
+      updateToolStatus: (toolId, status) => {
+        set((state) => ({
+          tools: state.tools.map((t) =>
+            t.id === toolId ? { ...t, status } : t
+          ),
+        }));
+      },
+
+      updateToolLocation: (toolId, location, buildingId, buildingName) => {
+        set((state) => ({
+          tools: state.tools.map((t) =>
+            t.id === toolId
+              ? {
+                  ...t,
+                  location,
+                  buildingId: buildingId ?? t.buildingId,
+                  buildingName: buildingName ?? t.buildingName,
+                }
+              : t
+          ),
         }));
       },
     }),

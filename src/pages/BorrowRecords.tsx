@@ -14,7 +14,7 @@ import Input from '@/components/common/Input';
 
 export default function BorrowRecords() {
   const {
-    getMyReservations, getMyBorrowRecords, getExpiringSoonCount, currentUser, cancelReservation, approveReservation, rejectReservation, borrowRecords, reservations, isAdminView, tools } = useAppStore();
+    getMyReservations, getMyBorrowRecords, getExpiringSoonCount, currentUser, cancelReservation, approveReservation, rejectReservation, borrowRecords, reservations, isAdminView, tools, borrowTool } = useAppStore();
 
   const [showBorrowScanner, setShowBorrowScanner] = useState(false);
   const [showReturnScanner, setShowReturnScanner] = useState(false);
@@ -24,6 +24,12 @@ export default function BorrowRecords() {
   const [damageSeverity, setDamageSeverity] = useState<DamageSeverity>('minor');
   const [damageAmount, setDamageAmount] = useState(0);
   const [activeTab, setActiveTab] = useState('reservations');
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const showToast = (type: 'success' | 'error', message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 2500);
+  };
 
   const myReservations = getMyReservations();
   const myBorrowRecords = getMyBorrowRecords();
@@ -96,7 +102,12 @@ export default function BorrowRecords() {
               isAdmin={isAdminView}
               onBorrow={() => {
                 if (isAdminView) {
-                  useAppStore.getState().borrowTool(reservation.toolId, reservation.id);
+                  const success = useAppStore.getState().borrowTool(reservation.toolId, reservation.id);
+                  if (success) {
+                    showToast('success', `已确认借出「${reservation.toolName}」`);
+                  } else {
+                    showToast('error', '借出失败，请检查工具库存或预约状态');
+                  }
                 }
               }}
             />
@@ -308,6 +319,19 @@ export default function BorrowRecords() {
           </div>
         </div>
       </Modal>
+
+      {toast && (
+        <div className={`fixed top-6 right-6 z-50 px-5 py-3 rounded-lg shadow-lg flex items-center gap-2 ${
+          toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'
+        }`}>
+          {toast.type === 'success' ? (
+            <CheckCircle2 className="w-5 h-5" />
+          ) : (
+            <AlertCircle className="w-5 h-5" />
+          )}
+          <span className="text-sm font-medium">{toast.message}</span>
+        </div>
+      )}
     </div>
   );
 }

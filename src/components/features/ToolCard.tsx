@@ -27,7 +27,9 @@ export default function ToolCard({ tool, onSelect }: ToolCardProps) {
     onSelect?.(tool);
   };
 
-  const isAvailable = tool.availableStock > 0;
+  const isAvailable = tool.availableStock > 0 && tool.status === 'available';
+  const statusLabel = tool.status === 'maintenance' ? '维修中' : tool.status === 'lost' ? '已丢失' : null;
+  const statusVariant = tool.status === 'maintenance' ? 'warning' : tool.status === 'lost' ? 'danger' : 'success';
 
   return (
     <Card hover onClick={handleClick}>
@@ -35,14 +37,17 @@ export default function ToolCard({ tool, onSelect }: ToolCardProps) {
         <img
           src={tool.image}
           alt={tool.name}
-          className="w-full h-40 object-cover rounded-t-lg"
+          className={`w-full h-40 object-cover rounded-t-lg ${!isAvailable ? 'opacity-60 grayscale' : ''}`}
           loading="lazy"
         />
-        <div className="absolute top-3 left-3">
+        <div className="absolute top-3 left-3 flex flex-col gap-1">
           <Badge variant="primary">
             <CategoryIcon className="w-3 h-3 mr-1" />
             {tool.categoryName}
           </Badge>
+          {statusLabel && (
+            <Badge variant={statusVariant as any}>{statusLabel}</Badge>
+          )}
         </div>
         {isAvailable ? (
           <div className="absolute top-3 right-3">
@@ -50,7 +55,7 @@ export default function ToolCard({ tool, onSelect }: ToolCardProps) {
           </div>
         ) : (
           <div className="absolute top-3 right-3">
-            <Badge variant="danger">暂无库存</Badge>
+            <Badge variant="danger">{statusLabel || '暂无库存'}</Badge>
           </div>
         )}
       </div>
@@ -78,7 +83,7 @@ export default function ToolCard({ tool, onSelect }: ToolCardProps) {
           </div>
         </div>
         <Link
-          to={`/reserve?toolId=${tool.id}`}
+          to={`/reservation?toolId=${tool.id}`}
           onClick={(e) => e.stopPropagation()}
           className={`mt-3 w-full flex items-center justify-center py-2 rounded text-sm font-medium transition-colors ${
             isAvailable
@@ -86,7 +91,7 @@ export default function ToolCard({ tool, onSelect }: ToolCardProps) {
               : 'bg-gray-200 text-gray-500 cursor-not-allowed'
           }`}
         >
-          {isAvailable ? '立即预约' : '暂无可用'}
+          {isAvailable ? '立即预约' : statusLabel || '暂无可用'}
         </Link>
       </div>
     </Card>
