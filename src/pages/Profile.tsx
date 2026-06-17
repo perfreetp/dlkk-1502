@@ -130,7 +130,14 @@ export default function Profile() {
   };
 
   const handleCardClick = (tab: string) => {
-    navigate('/records', { state: { activeTab: tab } });
+    const tabMap: Record<string, string> = {
+      pending: 'pending',
+      approved: 'approved',
+      borrowed: 'borrowed-records',
+      overdue: 'overdue',
+      returned: 'unpaid',
+    };
+    navigate('/records', { state: { activeTab: tabMap[tab] || tab, taskMode: true } });
   };
 
   const handleAddBlacklist = () => {
