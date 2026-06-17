@@ -22,7 +22,7 @@ interface AppState {
   isAdminView: boolean;
 
   setSelectedTool: (tool: Tool | null) => void;
-  toggleAdminView: () => void;
+  toggleAdminView: () => boolean;
   addReservation: (reservation: Omit<Reservation, 'id' | 'createdAt' | 'status' | 'userId' | 'userName' | 'roomNumber'>) => void;
   approveReservation: (id: string) => void;
   rejectReservation: (id: string, reason: string) => void;
@@ -34,6 +34,9 @@ interface AppState {
   getExpiringSoonCount: () => number;
   getOverdueCount: () => number;
   getUnpaidCompensationCount: () => number;
+  getPendingApprovalCount: () => number;
+  getPendingBorrowCount: () => number;
+  getPendingReturnCountAdmin: () => number;
   getHotTools: () => Tool[];
   getMyReservations: () => Reservation[];
   getMyBorrowRecords: () => BorrowRecord[];
@@ -46,6 +49,7 @@ interface AppState {
   updateToolStatus: (toolId: string, status: Tool['status']) => void;
   updateToolLocation: (toolId: string, location: string, buildingId?: string, buildingName?: string) => void;
   canReserveTool: (toolId: string, startDate: string, endDate: string, timeSlot: TimeSlot) => boolean;
+  payCompensation: (recordId: string) => void;
 }
 
 const generateId = () => Math.random().toString(36).substring(2, 10);
@@ -53,6 +57,7 @@ const generateId = () => Math.random().toString(36).substring(2, 10);
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
+      ...(currentUser.role !== 'admin' ? { isAdminView: false } : {}),
       currentUser,
       tools: initialTools,
       reservations: initialReservations,
@@ -65,7 +70,11 @@ export const useAppStore = create<AppState>()(
 
       setSelectedTool: (tool) => set({ selectedTool: tool }),
 
-      toggleAdminView: () => set((state) => ({ isAdminView: !state.isAdminView })),
+      toggleAdminView: () => {
+        if (get().currentUser.role !== 'admin') return false;
+        set((state) => ({ isAdminView: !state.isAdminView }));
+        return true;
+      },
 
       addReservation: (reservationData) => {
         const user = get().currentUser;
@@ -306,6 +315,30 @@ export const useAppStore = create<AppState>()(
           }).length;
       },
 
+      getPendingApprovalCount: () => {
+        return get().reservations.filter((r) => r.status === 'pending').length;
+      },
+
+      getPendingBorrowCount: () => {
+        return get().reservations.filter((r) => r.status === 'approved').length;
+      },
+
+      getPendingReturnCountAdmin: () => {
+        return get().borrowRecords.filter((r) => r.status === 'borrowed').length;
+      },
+
+      payCompensation: (recordId) => {
+        if (!get().isAdminView) return;
+        if (get().currentUser.role !== 'admin') return;
+        set((state) => ({
+          borrowRecords: state.borrowRecords.map((r) =>
+            r.id === recordId && r.damageReport
+              ? { ...r, damageReport: { ...r.damageReport, isPaid: true } }
+              : r
+          ),
+        }));
+      },
+
       getToolReservedDates: (toolId) => {
         const dates: Set<string> = new Set();
         get()
@@ -420,7 +453,13 @@ export const useAppStore = create<AppState>()(
         borrowRecords: state.borrowRecords,
         tools: state.tools,
         currentUser: state.currentUser,
+        isAdminView: state.isAdminView,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state && state.currentUser && state.currentUser.role !== 'admin') {
+          state.isAdminView = false;
+        }
+      },
     }
   )
 );

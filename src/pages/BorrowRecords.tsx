@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
-import { Scan, LogIn, LogOut, AlertTriangle, CheckCircle2, XCircle, Package, AlertCircle, Flag } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
+import { Scan, LogIn, LogOut, AlertTriangle, CheckCircle2, XCircle, Package, AlertCircle, Flag, Search, Filter, Download, Calendar, Users, Wrench } from 'lucide-react';
 import { useAppStore } from '@/store';
-import { formatDateTime, getStatusLabel, getStatusColor, isExpiringSoon } from '@/utils/date';
-import { BorrowRecord, Reservation, DamageSeverity } from '@/types';
+import { formatDateTime, formatDate, getStatusLabel, getStatusColor, isExpiringSoon } from '@/utils/date';
+import { BorrowRecord, Reservation, DamageSeverity, ReservationStatus, BorrowStatus } from '@/types';
 import Card from '@/components/common/Card';
 import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
@@ -12,9 +13,21 @@ import QRCodeScanner from '@/components/features/QRCodeScanner';
 import StatusTag from '@/components/common/StatusTag';
 import Input from '@/components/common/Input';
 
+const STATUS_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: '全部状态' },
+  { value: 'pending', label: '待审核' },
+  { value: 'approved', label: '已通过' },
+  { value: 'borrowed', label: '借用中' },
+  { value: 'returned', label: '已归还' },
+  { value: 'rejected', label: '已拒绝' },
+  { value: 'cancelled', label: '已取消' },
+];
+
 export default function BorrowRecords() {
+  const location = useLocation() as { state?: { activeTab?: string } };
   const {
-    getMyReservations, getMyBorrowRecords, getExpiringSoonCount, currentUser, cancelReservation, approveReservation, rejectReservation, borrowRecords, reservations, isAdminView, tools, borrowTool } = useAppStore();
+    getMyReservations, getMyBorrowRecords, getExpiringSoonCount, currentUser, cancelReservation, approveReservation, rejectReservation, borrowRecords, reservations, isAdminView, tools, borrowTool
+  } = useAppStore();
 
   const [showBorrowScanner, setShowBorrowScanner] = useState(false);
   const [showReturnScanner, setShowReturnScanner] = useState(false);
@@ -25,6 +38,24 @@ export default function BorrowRecords() {
   const [damageAmount, setDamageAmount] = useState(0);
   const [activeTab, setActiveTab] = useState('reservations');
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const [filterUser, setFilterUser] = useState('');
+  const [filterToolId, setFilterToolId] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [dateStart, setDateStart] = useState('');
+  const [dateEnd, setDateEnd] = useState('');
+
+  useEffect(() => {
+    if (location.state?.activeTab) {
+      const tabMap: Record<string, string> = {
+        'pending': 'reservations',
+        'approved': 'approved',
+        'borrowed': 'borrowed-records',
+        'returned': 'returned',
+      };
+      setActiveTab(tabMap[location.state.activeTab] || 'reservations');
+    }
+  }, [location.state]);
 
   const showToast = (type: 'success' | 'error', message: string) => {
     setToast({ type, message });
@@ -38,11 +69,90 @@ export default function BorrowRecords() {
   const displayReservations = isAdminView ? reservations : myReservations;
   const displayRecords = isAdminView ? borrowRecords : myBorrowRecords;
 
-  const pendingReservations = displayReservations.filter((r) => r.status === 'pending');
-  const activeReservations = displayReservations.filter((r) => r.status === 'approved');
-  const borrowedReservations = displayReservations.filter((r) => r.status === 'borrowed');
-  const borrowedRecords = displayRecords.filter((r) => r.status === 'borrowed');
-  const returnedRecords = displayRecords.filter((r) => r.status === 'returned');
+  const allUsers = useMemo(() => {
+    const userSet = new Set<string>();
+    reservations.forEach((r) => userSet.add(`${r.userName}|${r.roomNumber}`));
+    borrowRecords.forEach((r) => userSet.add(`${r.userName}|${r.roomNumber}`));
+    return Array.from(userSet).map((u) => {
+      const [name, room] = u.split('|');
+      return { name, room };
+    });
+  }, [reservations, borrowRecords]);
+
+  const allRecords = useMemo(() => {
+    const combined: Array<Reservation | BorrowRecord> = [
+      ...displayReservations,
+      ...displayRecords,
+    ];
+    return combined;
+  }, [displayReservations, displayRecords]);
+
+  const filteredAllRecords = useMemo(() => {
+    let records = allRecords;
+    if (filterUser.trim()) {
+      const keyword = filterUser.trim().toLowerCase();
+      records = records.filter(
+        (r) =>
+          'userName' in r &&
+          (r.userName.toLowerCase().includes(keyword) ||
+            r.roomNumber.toLowerCase().includes(keyword))
+      );
+    }
+    if (filterToolId) {
+      records = records.filter((r) => r.toolId === filterToolId);
+    }
+    if (filterStatus) {
+      records = records.filter((r) => r.status === filterStatus);
+    }
+    if (dateStart) {
+      records = records.filter((r) => {
+        const date = 'startDate' in r ? r.startDate : r.borrowAt;
+        return date >= dateStart;
+      });
+    }
+    if (dateEnd) {
+      records = records.filter((r) => {
+        const date = 'endDate' in r ? r.endDate : (r.actualReturnAt || r.expectedReturnAt);
+        return date <= dateEnd;
+      });
+    }
+    return records;
+  }, [allRecords, filterUser, filterToolId, filterStatus, dateStart, dateEnd]);
+
+  const pendingReservations = filteredAllRecords.filter((r) => 'startDate' in r && r.status === 'pending') as Reservation[];
+  const activeReservations = filteredAllRecords.filter((r) => 'startDate' in r && r.status === 'approved') as Reservation[];
+  const borrowedReservations = filteredAllRecords.filter((r) => 'startDate' in r && r.status === 'borrowed') as Reservation[];
+  const borrowedRecords = filteredAllRecords.filter((r) => 'borrowAt' in r && r.status === 'borrowed') as BorrowRecord[];
+  const returnedRecords = filteredAllRecords.filter((r) => 'borrowAt' in r && r.status === 'returned') as BorrowRecord[];
+
+  const hasActiveFilters = filterUser || filterToolId || filterStatus || dateStart || dateEnd;
+
+  const exportToCSV = () => {
+    const headers = ['住户', '房间号', '工具', '状态', '开始日期', '结束日期', '押金', '租金', '赔偿'];
+    const rows = filteredAllRecords.map((r) => {
+      const isReservation = 'startDate' in r;
+      return [
+        isReservation ? r.userName : r.userName,
+        isReservation ? r.roomNumber : r.roomNumber,
+        r.toolName,
+        getStatusLabel(r.status),
+        formatDate(isReservation ? r.startDate : r.borrowAt),
+        formatDate(isReservation ? r.endDate : (r.actualReturnAt || r.expectedReturnAt)),
+        isReservation ? r.totalDeposit : r.depositPaid,
+        isReservation ? r.totalRent : r.rentPaid,
+        'damageReport' in r && r.damageReport ? r.damageReport.compensationAmount : 0,
+      ].join(',');
+    });
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `借还记录_${formatDate(new Date().toISOString())}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast('success', '导出成功');
+  };
 
   const handleReturnWithDamage = () => {
     if (!selectedRecord) return;
@@ -180,6 +290,14 @@ export default function BorrowRecords() {
     },
   ];
 
+  const clearFilters = () => {
+    setFilterUser('');
+    setFilterToolId('');
+    setFilterStatus('');
+    setDateStart('');
+    setDateEnd('');
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -190,6 +308,15 @@ export default function BorrowRecords() {
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
+          {isAdminView && (
+            <Button
+              variant="outline"
+              onClick={exportToCSV}
+            >
+              <Download className="w-4 h-4 mr-2" />
+              导出筛选结果
+            </Button>
+          )}
           <Button
             variant="primary"
             onClick={() => setShowBorrowScanner(true)}
@@ -206,6 +333,81 @@ export default function BorrowRecords() {
           </Button>
         </div>
       </div>
+
+      {isAdminView && (
+        <Card>
+          <Card.Content className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Filter className="w-4 h-4 text-gray-400" />
+              <span className="text-sm font-medium text-gray-700">筛选条件</span>
+              {hasActiveFilters && (
+                <Button variant="ghost" size="sm" onClick={clearFilters}>
+                  清除全部
+                </Button>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-gray-400" />
+                <Input
+                  placeholder="搜索住户..."
+                  value={filterUser}
+                  onChange={(e) => setFilterUser(e.target.value)}
+                  className="flex-1"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Wrench className="w-4 h-4 text-gray-400" />
+                <select
+                  value={filterToolId}
+                  onChange={(e) => setFilterToolId(e.target.value)}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                >
+                  <option value="">全部工具</option>
+                  {tools.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <StatusTag status="approved" />
+                <select
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value)}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                >
+                  {STATUS_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-gray-400" />
+                <input
+                  type="date"
+                  value={dateStart}
+                  onChange={(e) => setDateStart(e.target.value)}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-gray-400" />
+                <input
+                  type="date"
+                  value={dateEnd}
+                  onChange={(e) => setDateEnd(e.target.value)}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                />
+              </div>
+            </div>
+            {hasActiveFilters && (
+              <div className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-500">
+                当前筛选结果: 共 {filteredAllRecords.length} 条记录
+              </div>
+            )}
+          </Card.Content>
+        </Card>
+      )}
 
       {expiringSoonCount > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">

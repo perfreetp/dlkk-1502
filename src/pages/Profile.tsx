@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
-import { User, Package, CreditCard, AlertTriangle, History, Shield, Ban, CheckCircle, XCircle, Building2, Phone, Hash, TrendingUp, Clock, AlertCircle, Search, Filter } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { User, Package, CreditCard, AlertTriangle, History, Shield, Ban, CheckCircle, XCircle, Building2, Phone, Hash, TrendingUp, Clock, AlertCircle, Search, Filter, FileText, LogIn, LogOut, DollarSign, CalendarCheck, ChevronRight } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { formatDate, isExpiringSoon } from '@/utils/date';
 import { BorrowRecord } from '@/types';
@@ -12,6 +13,7 @@ import Input from '@/components/common/Input';
 import Modal from '@/components/common/Modal';
 
 export default function Profile() {
+  const navigate = useNavigate();
   const {
     currentUser,
     isAdminView,
@@ -27,6 +29,11 @@ export default function Profile() {
     getOverdueCount,
     getExpiringSoonCount,
     getUnpaidCompensationCount,
+    getPendingApprovalCount,
+    getPendingBorrowCount,
+    getPendingReturnCountAdmin,
+    payCompensation,
+    reservations,
   } = useAppStore();
 
   const [showBlacklistModal, setShowBlacklistModal] = useState(false);
@@ -34,13 +41,21 @@ export default function Profile() {
   const [blacklistDays, setBlacklistDays] = useState(7);
   const [filterToolId, setFilterToolId] = useState('');
   const [filterUser, setFilterUser] = useState('');
+  const [statsFilterToolId, setStatsFilterToolId] = useState('');
+  const [statsFilterUser, setStatsFilterUser] = useState('');
 
   const myRecords = getMyBorrowRecords();
   const myDeposits = getMyDeposits();
   const myCompensations = getMyCompensations();
   const hotTools = getHotTools();
 
-  const baseRecords = useMemo(() => {
+  const pendingApprovalCount = getPendingApprovalCount();
+  const pendingBorrowCount = getPendingBorrowCount();
+  const pendingReturnCount = getPendingReturnCountAdmin();
+  const overdueCountGlobal = getOverdueCount();
+  const unpaidCountGlobal = getUnpaidCompensationCount();
+
+  const historyBaseRecords = useMemo(() => {
     let records = isAdminView ? borrowRecords : myRecords;
     if (isAdminView) {
       if (filterToolId) {
@@ -58,38 +73,65 @@ export default function Profile() {
     return records;
   }, [isAdminView, borrowRecords, myRecords, filterToolId, filterUser]);
 
-  const filteredRecords = baseRecords;
+  const statsBaseRecords = useMemo(() => {
+    let records = borrowRecords;
+    if (statsFilterToolId) {
+      records = records.filter((r) => r.toolId === statsFilterToolId);
+    }
+    if (statsFilterUser.trim()) {
+      const keyword = statsFilterUser.trim().toLowerCase();
+      records = records.filter(
+        (r) =>
+          r.userName.toLowerCase().includes(keyword) ||
+          r.roomNumber.toLowerCase().includes(keyword)
+      );
+    }
+    return records;
+  }, [borrowRecords, statsFilterToolId, statsFilterUser]);
+
+  const filteredRecords = historyBaseRecords;
 
   const totalBorrowed = filteredRecords.length;
   const totalDeposit = myDeposits.reduce((sum, d) => sum + d.amount, 0);
   const totalCompensation = myCompensations.reduce((sum, c) => sum + c.amount, 0);
   const pendingCompensation = myCompensations.filter((c) => c.status === '待支付').reduce((sum, c) => sum + c.amount, 0);
 
-  const overdueCount = useMemo(() => {
+  const statsOverdueCount = useMemo(() => {
     const now = new Date();
-    return baseRecords.filter((r) => r.status === 'borrowed' && new Date(r.expectedReturnAt) < now).length;
-  }, [baseRecords]);
+    return statsBaseRecords.filter((r) => r.status === 'borrowed' && new Date(r.expectedReturnAt) < now).length;
+  }, [statsBaseRecords]);
 
-  const expiringSoonCount = useMemo(() => {
-    return baseRecords.filter((r) => r.status === 'borrowed' && isExpiringSoon(r.expectedReturnAt)).length;
-  }, [baseRecords]);
+  const statsExpiringSoonCount = useMemo(() => {
+    return statsBaseRecords.filter((r) => r.status === 'borrowed' && isExpiringSoon(r.expectedReturnAt)).length;
+  }, [statsBaseRecords]);
 
-  const unpaidCompensationCount = useMemo(() => {
-    return baseRecords.filter((r) => r.damageReport && !r.damageReport.isPaid).length;
-  }, [baseRecords]);
+  const statsUnpaidCompensationCount = useMemo(() => {
+    return statsBaseRecords.filter((r) => r.damageReport && !r.damageReport.isPaid).length;
+  }, [statsBaseRecords]);
 
-  const overdueRecords = useMemo(() => {
+  const statsOverdueRecords = useMemo(() => {
     const now = new Date();
-    return baseRecords.filter((r) => r.status === 'borrowed' && new Date(r.expectedReturnAt) < now);
-  }, [baseRecords]);
+    return statsBaseRecords.filter((r) => r.status === 'borrowed' && new Date(r.expectedReturnAt) < now);
+  }, [statsBaseRecords]);
 
-  const expiringRecords = useMemo(() => {
-    return baseRecords.filter((r) => r.status === 'borrowed' && isExpiringSoon(r.expectedReturnAt));
-  }, [baseRecords]);
+  const statsExpiringRecords = useMemo(() => {
+    return statsBaseRecords.filter((r) => r.status === 'borrowed' && isExpiringSoon(r.expectedReturnAt));
+  }, [statsBaseRecords]);
 
-  const unpaidCompensations = useMemo(() => {
-    return baseRecords.filter((r) => r.damageReport && !r.damageReport.isPaid);
-  }, [baseRecords]);
+  const statsUnpaidCompensations = useMemo(() => {
+    return statsBaseRecords.filter((r) => r.damageReport && !r.damageReport.isPaid);
+  }, [statsBaseRecords]);
+
+  const handleToggleAdmin = () => {
+    const success = toggleAdminView();
+    if (!success && currentUser.role !== 'admin') {
+      console.log('无权限切换到管理视图');
+    }
+  };
+
+  const handleCardClick = (tab: string) => {
+    navigate('/records', { state: { activeTab: tab } });
+  };
 
   const handleAddBlacklist = () => {
     if (!blacklistReason.trim()) return;
@@ -160,6 +202,16 @@ export default function Profile() {
                             损坏
                           </Badge>
                         )}
+                        {isAdminView && record.damageReport && !record.damageReport.isPaid && (
+                          <Button
+                            size="sm"
+                            variant="success"
+                            onClick={() => payCompensation(record.id)}
+                          >
+                            <DollarSign className="w-3 h-3 mr-1" />
+                            标记已赔付
+                          </Button>
+                        )}
                       </div>
                       {isAdminView && (
                         <p className="text-xs text-gray-500 mb-1">
@@ -179,6 +231,7 @@ export default function Profile() {
                         {record.damageReport && (
                           <span className="text-red-600">
                             赔偿 ¥{record.damageReport.compensationAmount}
+                            {record.damageReport.isPaid ? ' (已支付)' : ' (待支付)'}
                           </span>
                         )}
                       </div>
@@ -272,6 +325,37 @@ export default function Profile() {
       label: '管理统计',
       content: (
         <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row gap-3 p-4 bg-gray-50 rounded-lg">
+            <div className="flex items-center gap-2 flex-1">
+              <Filter className="w-4 h-4 text-gray-400" />
+              <select
+                value={statsFilterToolId}
+                onChange={(e) => setStatsFilterToolId(e.target.value)}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+              >
+                <option value="">全部工具</option>
+                {tools.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2 flex-1">
+              <Search className="w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                value={statsFilterUser}
+                onChange={(e) => setStatsFilterUser(e.target.value)}
+                placeholder="搜索住户姓名或房间号..."
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            {(statsFilterToolId || statsFilterUser) && (
+              <Button variant="outline" size="sm" onClick={() => { setStatsFilterToolId(''); setStatsFilterUser(''); }}>
+                清除筛选
+              </Button>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Card className="border-l-4 border-l-red-500">
               <Card.Content className="p-4">
@@ -280,7 +364,7 @@ export default function Profile() {
                     <AlertCircle className="w-5 h-5 text-red-600" />
                   </div>
                   <div>
-                    <p className="text-2xl font-bold text-red-600">{overdueCount}</p>
+                    <p className="text-2xl font-bold text-red-600">{statsOverdueCount}</p>
                     <p className="text-xs text-gray-500">逾期未还</p>
                   </div>
                 </div>
@@ -293,7 +377,7 @@ export default function Profile() {
                     <Clock className="w-5 h-5 text-amber-600" />
                   </div>
                   <div>
-                    <p className="text-2xl font-bold text-amber-600">{expiringSoonCount}</p>
+                    <p className="text-2xl font-bold text-amber-600">{statsExpiringSoonCount}</p>
                     <p className="text-xs text-gray-500">即将到期</p>
                   </div>
                 </div>
@@ -306,7 +390,7 @@ export default function Profile() {
                     <XCircle className="w-5 h-5 text-orange-600" />
                   </div>
                   <div>
-                    <p className="text-2xl font-bold text-orange-600">{unpaidCompensationCount}</p>
+                    <p className="text-2xl font-bold text-orange-600">{statsUnpaidCompensationCount}</p>
                     <p className="text-xs text-gray-500">赔付待处理</p>
                   </div>
                 </div>
@@ -314,14 +398,14 @@ export default function Profile() {
             </Card>
           </div>
 
-          {overdueRecords.length > 0 && (
+          {statsOverdueRecords.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-red-600" />
                 逾期未还清单
               </h3>
               <div className="space-y-2">
-                {overdueRecords.map((r) => (
+                {statsOverdueRecords.map((r) => (
                   <div key={r.id} className="flex items-center gap-3 p-3 bg-red-50 rounded-lg border border-red-100">
                     <img src={r.toolImage} alt="" className="w-10 h-10 rounded object-cover" />
                     <div className="flex-1 min-w-0">
@@ -335,14 +419,14 @@ export default function Profile() {
             </div>
           )}
 
-          {expiringRecords.length > 0 && (
+          {statsExpiringRecords.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
                 <Clock className="w-4 h-4 text-amber-600" />
                 即将到期清单
               </h3>
               <div className="space-y-2">
-                {expiringRecords.map((r) => (
+                {statsExpiringRecords.map((r) => (
                   <div key={r.id} className="flex items-center gap-3 p-3 bg-amber-50 rounded-lg border border-amber-100">
                     <img src={r.toolImage} alt="" className="w-10 h-10 rounded object-cover" />
                     <div className="flex-1 min-w-0">
@@ -356,21 +440,33 @@ export default function Profile() {
             </div>
           )}
 
-          {unpaidCompensations.length > 0 && (
+          {statsUnpaidCompensations.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
                 <XCircle className="w-4 h-4 text-orange-600" />
                 赔付待处理清单
               </h3>
               <div className="space-y-2">
-                {unpaidCompensations.map((r) => (
+                {statsUnpaidCompensations.map((r) => (
                   <div key={r.id} className="flex items-center gap-3 p-3 bg-orange-50 rounded-lg border border-orange-100">
                     <img src={r.toolImage} alt="" className="w-10 h-10 rounded object-cover" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{r.toolName}</p>
                       <p className="text-xs text-gray-500">{r.userName} · {r.roomNumber} · {r.damageReport?.description}</p>
                     </div>
-                    <span className="text-sm font-semibold text-orange-600">¥{r.damageReport?.compensationAmount}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-orange-600">¥{r.damageReport?.compensationAmount}</span>
+                      {!r.damageReport?.isPaid && (
+                        <Button
+                          size="sm"
+                          variant="success"
+                          onClick={() => payCompensation(r.id)}
+                        >
+                          <DollarSign className="w-3 h-3 mr-1" />
+                          已赔付
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -427,19 +523,138 @@ export default function Profile() {
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-1">个人中心</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">
+            {isAdminView ? '物业工作台' : '个人中心'}
+          </h1>
           <p className="text-sm text-gray-500">
-            {isAdminView ? '管理后台信息' : '查看您的账户信息和借用记录'}
+            {isAdminView ? '管理后台信息与待办事项' : '查看您的账户信息和借用记录'}
           </p>
         </div>
-        <Button
-          variant={isAdminView ? 'primary' : 'outline'}
-          onClick={toggleAdminView}
-        >
-          <Shield className="w-4 h-4 mr-2" />
-          {isAdminView ? '切换到居民视图' : '切换到管理员视图'}
-        </Button>
+        {currentUser.role === 'admin' && (
+          <Button
+            variant={isAdminView ? 'primary' : 'outline'}
+            onClick={handleToggleAdmin}
+          >
+            <Shield className="w-4 h-4 mr-2" />
+            {isAdminView ? '切换到居民视图' : '切换到管理员视图'}
+          </Button>
+        )}
       </div>
+
+      {isAdminView && (
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            <FileText className="w-5 h-5 text-blue-600" />
+            今日待办
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            <Card
+              hover
+              className="cursor-pointer border-l-4 border-l-blue-500 hover:shadow-md transition-shadow"
+              onClick={() => handleCardClick('pending')}
+            >
+              <Card.Content className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-3xl font-bold text-blue-600">{pendingApprovalCount}</p>
+                    <p className="text-xs text-gray-500 mt-1">待审核预约</p>
+                  </div>
+                  <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
+                    <Clock className="w-6 h-6 text-blue-600" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-end mt-2 text-xs text-blue-600">
+                  查看 <ChevronRight className="w-3 h-3" />
+                </div>
+              </Card.Content>
+            </Card>
+
+            <Card
+              hover
+              className="cursor-pointer border-l-4 border-l-green-500 hover:shadow-md transition-shadow"
+              onClick={() => handleCardClick('approved')}
+            >
+              <Card.Content className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-3xl font-bold text-green-600">{pendingBorrowCount}</p>
+                    <p className="text-xs text-gray-500 mt-1">待借出</p>
+                  </div>
+                  <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
+                    <LogIn className="w-6 h-6 text-green-600" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-end mt-2 text-xs text-green-600">
+                  查看 <ChevronRight className="w-3 h-3" />
+                </div>
+              </Card.Content>
+            </Card>
+
+            <Card
+              hover
+              className="cursor-pointer border-l-4 border-l-purple-500 hover:shadow-md transition-shadow"
+              onClick={() => handleCardClick('borrowed')}
+            >
+              <Card.Content className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-3xl font-bold text-purple-600">{pendingReturnCount}</p>
+                    <p className="text-xs text-gray-500 mt-1">待归还</p>
+                  </div>
+                  <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
+                    <LogOut className="w-6 h-6 text-purple-600" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-end mt-2 text-xs text-purple-600">
+                  查看 <ChevronRight className="w-3 h-3" />
+                </div>
+              </Card.Content>
+            </Card>
+
+            <Card
+              hover
+              className="cursor-pointer border-l-4 border-l-red-500 hover:shadow-md transition-shadow"
+              onClick={() => handleCardClick('borrowed')}
+            >
+              <Card.Content className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-3xl font-bold text-red-600">{overdueCountGlobal}</p>
+                    <p className="text-xs text-gray-500 mt-1">逾期未还</p>
+                  </div>
+                  <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center">
+                    <AlertCircle className="w-6 h-6 text-red-600" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-end mt-2 text-xs text-red-600">
+                  查看 <ChevronRight className="w-3 h-3" />
+                </div>
+              </Card.Content>
+            </Card>
+
+            <Card
+              hover
+              className="cursor-pointer border-l-4 border-l-orange-500 hover:shadow-md transition-shadow"
+              onClick={() => handleCardClick('returned')}
+            >
+              <Card.Content className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-3xl font-bold text-orange-600">{unpaidCountGlobal}</p>
+                    <p className="text-xs text-gray-500 mt-1">赔付待处理</p>
+                  </div>
+                  <div className="w-12 h-12 bg-orange-100 rounded-xl flex items-center justify-center">
+                    <DollarSign className="w-6 h-6 text-orange-600" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-end mt-2 text-xs text-orange-600">
+                  查看 <ChevronRight className="w-3 h-3" />
+                </div>
+              </Card.Content>
+            </Card>
+          </div>
+        </div>
+      )}
 
       {currentUser.isBlacklisted && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
