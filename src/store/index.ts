@@ -155,7 +155,7 @@ export const useAppStore = create<AppState>()(
           ),
           reservations: reservationId
             ? state.reservations.map((r) =>
-                r.id === reservationId ? { ...r, status: 'cancelled' as const } : r
+                r.id === reservationId ? { ...r, status: 'borrowed' as const } : r
               )
             : state.reservations,
         }));
@@ -387,6 +387,8 @@ export const useAppStore = create<AppState>()(
       },
 
       updateToolStatus: (toolId, status) => {
+        if (!get().isAdminView) return;
+        if (get().currentUser.role !== 'admin') return;
         set((state) => ({
           tools: state.tools.map((t) =>
             t.id === toolId ? { ...t, status } : t
@@ -395,6 +397,8 @@ export const useAppStore = create<AppState>()(
       },
 
       updateToolLocation: (toolId, location, buildingId, buildingName) => {
+        if (!get().isAdminView) return;
+        if (get().currentUser.role !== 'admin') return;
         set((state) => ({
           tools: state.tools.map((t) =>
             t.id === toolId

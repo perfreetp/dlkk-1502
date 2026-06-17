@@ -5,9 +5,9 @@ import { useAppStore } from '@/store';
 import { getStatusColor, getStatusLabel } from '@/utils/date';
 
 const navItems = [
-  { path: '/home', label: '首页', icon: Home },
+  { path: '/', label: '首页', icon: Home },
   { path: '/tools', label: '工具目录', icon: Wrench },
-  { path: '/reserve', label: '预约借用', icon: Calendar },
+  { path: '/reservation', label: '预约借用', icon: Calendar },
   { path: '/records', label: '借还记录', icon: ClipboardList },
   { path: '/profile', label: '个人中心', icon: User },
 ];

@@ -40,6 +40,7 @@ export default function BorrowRecords() {
 
   const pendingReservations = displayReservations.filter((r) => r.status === 'pending');
   const activeReservations = displayReservations.filter((r) => r.status === 'approved');
+  const borrowedReservations = displayReservations.filter((r) => r.status === 'borrowed');
   const borrowedRecords = displayRecords.filter((r) => r.status === 'borrowed');
   const returnedRecords = displayRecords.filter((r) => r.status === 'returned');
 
@@ -119,8 +120,27 @@ export default function BorrowRecords() {
       ),
     },
     {
-      key: 'borrowed',
-      label: `借用中 (${borrowedRecords.length})`,
+      key: 'borrowed-reservations',
+      label: `借用中 (${borrowedReservations.length})`,
+      content: (
+        <div className="space-y-4">
+          {borrowedReservations.length > 0 ? (
+            borrowedReservations.map((reservation) => (
+            <ReservationItem
+              key={reservation.id}
+              reservation={reservation}
+              isAdmin={isAdminView}
+            />
+          ))
+        ) : (
+            <EmptyState icon={LogIn} text="暂无借用中预约" />
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'borrowed-records',
+      label: `借用记录 (${borrowedRecords.length})`,
       content: (
         <div className="space-y-4">
           {borrowedRecords.length > 0 ? (

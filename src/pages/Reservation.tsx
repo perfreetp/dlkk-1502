@@ -103,7 +103,7 @@ export default function Reservation() {
 
   const handleDateSelect = (start: string, end: string) => {
     setStartDate(start);
-    setEndDate(end);
+    setEndDate(end || null);
   };
 
   const daysDiff = startDate && endDate ? getDaysDiff(startDate, endDate) + 1 : 0;

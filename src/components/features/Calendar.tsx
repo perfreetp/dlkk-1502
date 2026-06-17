@@ -62,10 +62,12 @@ export default function Calendar({
     if (!startDate || (startDate && endDate)) {
       setStartDate(date);
       setEndDate(null);
+      onDateSelect?.(date, '');
     } else if (startDate && !endDate) {
       if (date < startDate) {
         setStartDate(date);
         setEndDate(null);
+        onDateSelect?.(date, '');
       } else {
         setEndDate(date);
         onDateSelect?.(startDate, date);

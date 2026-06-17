@@ -40,11 +40,7 @@ export default function Profile() {
   const myCompensations = getMyCompensations();
   const hotTools = getHotTools();
 
-  const overdueCount = getOverdueCount();
-  const expiringSoonCount = getExpiringSoonCount();
-  const unpaidCompensationCount = getUnpaidCompensationCount();
-
-  const filteredRecords = useMemo(() => {
+  const baseRecords = useMemo(() => {
     let records = isAdminView ? borrowRecords : myRecords;
     if (isAdminView) {
       if (filterToolId) {
@@ -62,26 +58,38 @@ export default function Profile() {
     return records;
   }, [isAdminView, borrowRecords, myRecords, filterToolId, filterUser]);
 
+  const filteredRecords = baseRecords;
+
   const totalBorrowed = filteredRecords.length;
   const totalDeposit = myDeposits.reduce((sum, d) => sum + d.amount, 0);
   const totalCompensation = myCompensations.reduce((sum, c) => sum + c.amount, 0);
   const pendingCompensation = myCompensations.filter((c) => c.status === '待支付').reduce((sum, c) => sum + c.amount, 0);
 
+  const overdueCount = useMemo(() => {
+    const now = new Date();
+    return baseRecords.filter((r) => r.status === 'borrowed' && new Date(r.expectedReturnAt) < now).length;
+  }, [baseRecords]);
+
+  const expiringSoonCount = useMemo(() => {
+    return baseRecords.filter((r) => r.status === 'borrowed' && isExpiringSoon(r.expectedReturnAt)).length;
+  }, [baseRecords]);
+
+  const unpaidCompensationCount = useMemo(() => {
+    return baseRecords.filter((r) => r.damageReport && !r.damageReport.isPaid).length;
+  }, [baseRecords]);
+
   const overdueRecords = useMemo(() => {
     const now = new Date();
-    const base = isAdminView ? borrowRecords : myRecords;
-    return base.filter((r) => r.status === 'borrowed' && new Date(r.expectedReturnAt) < now);
-  }, [isAdminView, borrowRecords, myRecords]);
+    return baseRecords.filter((r) => r.status === 'borrowed' && new Date(r.expectedReturnAt) < now);
+  }, [baseRecords]);
 
   const expiringRecords = useMemo(() => {
-    const base = isAdminView ? borrowRecords : myRecords;
-    return base.filter((r) => r.status === 'borrowed' && isExpiringSoon(r.expectedReturnAt));
-  }, [isAdminView, borrowRecords, myRecords]);
+    return baseRecords.filter((r) => r.status === 'borrowed' && isExpiringSoon(r.expectedReturnAt));
+  }, [baseRecords]);
 
   const unpaidCompensations = useMemo(() => {
-    const base = isAdminView ? borrowRecords : myRecords;
-    return base.filter((r) => r.damageReport && !r.damageReport.isPaid);
-  }, [isAdminView, borrowRecords, myRecords]);
+    return baseRecords.filter((r) => r.damageReport && !r.damageReport.isPaid);
+  }, [baseRecords]);
 
   const handleAddBlacklist = () => {
     if (!blacklistReason.trim()) return;

@@ -44,7 +44,7 @@ export interface Tool {
 }
 
 export type TimeSlot = 'morning' | 'afternoon' | 'evening' | 'fullday';
-export type ReservationStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+export type ReservationStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'borrowed';
 export type BorrowStatus = 'borrowed' | 'returned' | 'overdue';
 export type DamageSeverity = 'minor' | 'moderate' | 'severe';
 export type AnnouncementType = 'notice' | 'faq' | 'rule';
